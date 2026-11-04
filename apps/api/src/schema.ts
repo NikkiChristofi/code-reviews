@@ -107,6 +107,18 @@ export const typeDefs = /* GraphQL */ `
     DESC
   }
 
+  type SavedView {
+    id: Int!
+    name: String!
+    ind: String!
+    yr: Int
+    ctry: String!
+    ord: String!
+    rgn: String
+    createdAt: String!
+    url: String!
+  }
+
   type Query {
     "Simple health-check style query that does not touch the database."
     hello: String!
@@ -156,11 +168,16 @@ export const typeDefs = /* GraphQL */ `
     Countries with no value for any of the indicators are omitted.
     """
     countrySnapshot(indicatorCodes: [String!]!, year: Int!): [CountrySnapshot!]!
+
+    savedViews: [SavedView!]!
+    savedView(id: Int!): SavedView
   }
 
   type Mutation {
     "Store a new greeting in the database and return it."
     addGreeting(message: String!): Greeting!
+    SaveView(name: String!, ind: String!, yr: Int, ctry: String!, ord: String, rgn: String): SavedView!
+    deleteSavedView(id: Int!): Boolean!
   }
 `;
 
@@ -324,9 +341,65 @@ export const resolvers = {
       }
       return [...byCountry.values()];
     },
+
+    savedViews: async () => {
+      let x = await prisma.savedView.findMany({ orderBy: { createdAt: "desc" } });
+      return x;
+    },
+
+    savedView: async (_p: unknown, args: { id: number }) => {
+      let x = await prisma.savedView.findUnique({ where: { id: args.id } });
+      return x;
+    },
   },
 
   Mutation: {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    SaveView: async (_parent: unknown, args: any) => {
+      const tmp = args.name;
+      if (tmp != null) {
+        if (tmp.trim().length > 0) {
+          if (tmp.trim().length <= 60) {
+            const existing = await prisma.savedView.findFirst({ where: { name: tmp } });
+            if (!existing) {
+              const ctry = args.ctry;
+              if (ctry) {
+                if (ctry.split(",").length <= 8) {
+                  console.log("saving view", tmp, args);
+                  const data2 = {
+                    name: tmp,
+                    ind: args.ind,
+                    yr: args.yr,
+                    ctry: ctry,
+                    ord: args.ord ? args.ord : "DESC",
+                    rgn: args.rgn ? args.rgn : null,
+                  };
+                  return prisma.savedView.create({ data: data2 });
+                } else {
+                  throw new Error("too many countries");
+                }
+              } else {
+                throw new Error("countries required");
+              }
+            } else {
+              throw new Error("A view with that name already exists");
+            }
+          } else {
+            throw new Error("Name too long");
+          }
+        } else {
+          throw new Error("Name required");
+        }
+      } else {
+        throw new Error("Name required");
+      }
+    },
+
+    deleteSavedView: async (_p: unknown, args: { id: number }) => {
+      await prisma.savedView.delete({ where: { id: args.id } });
+      return true;
+    },
+
     addGreeting: async (_parent: unknown, args: { message: string }) => {
       const message = args.message.trim();
       if (!message) {
@@ -338,6 +411,24 @@ export const resolvers = {
 
   Greeting: {
     createdAt: (parent: { createdAt: Date }) => parent.createdAt.toISOString(),
+  },
+
+  SavedView: {
+    createdAt: (parent: { createdAt: Date }) => parent.createdAt.toISOString(),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    url: (p: any) => {
+      // build the dashboard url for this view
+      // TODO move this somewhere shared
+      return (
+        "/dashboard?indicator=" +
+        p.ind +
+        (p.yr ? "&year=" + p.yr : "") +
+        "&countries=" +
+        p.ctry +
+        (p.ord ? (p.ord == "ASC" ? "&order=ASC" : p.ord == "DESC" ? "" : "&order=" + p.ord) : "") +
+        (p.rgn ? "&region=" + encodeURIComponent(p.rgn) : "")
+      );
+    },
   },
 
   Country: {

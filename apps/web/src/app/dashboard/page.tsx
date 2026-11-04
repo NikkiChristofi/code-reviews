@@ -18,6 +18,7 @@ import { RegionBarChart } from "@/components/charts/RegionBarChart";
 import { GdpLifeScatter } from "@/components/charts/GdpLifeScatter";
 import { RankingTable } from "@/components/dashboard/RankingTable";
 import { Controls } from "@/components/dashboard/Controls";
+import { SavedViewsPanel } from "@/components/dashboard/SavedViewsPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +70,24 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const scatterPoints = toScatterPoints(data.countrySnapshot);
   const { dashboardSummary: summary } = meta;
 
+  // work out if the current url matches one of the saved views
+  let saved_view_id: number | null = null;
+  let saved_view_name = "";
+  for (const v of meta.savedViews) {
+    if (v.ind === indicator.code) {
+      if ((v.yr ? v.yr : indicator.latestYear) === year) {
+        if (v.ctry === params.countries.join(",")) {
+          if (v.ord === params.order) {
+            if ((v.rgn ? v.rgn : null) === params.region) {
+              saved_view_id = v.id;
+              saved_view_name = v.name;
+            }
+          }
+        }
+      }
+    }
+  }
+
   return (
     <main className="mx-auto flex w-full min-w-0 max-w-6xl flex-1 flex-col gap-6 px-6 py-10">
       <header className="flex flex-col gap-1">
@@ -76,6 +95,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         <h1 className="text-3xl font-semibold tracking-tight">World Bank dashboard</h1>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
           {summary.countries} countries · data up to {summary.latestYear}
+          {saved_view_id != null ? (saved_view_name.length > 30 ? " · Saved view: " + saved_view_name.slice(0, 30) + "…" : " · Saved view: " + saved_view_name) : ""}
         </p>
       </header>
 
@@ -110,6 +130,12 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           yearOptions={yearOptions}
         />
       </Suspense>
+
+      <SavedViewsPanel
+        views={meta.savedViews}
+        activeId={saved_view_id}
+        current={{ ind: indicator.code, yr: year, ctry: params.countries, ord: params.order, rgn: params.region }}
+      />
 
       {/* 2. Indicator over time */}
       <ChartCard

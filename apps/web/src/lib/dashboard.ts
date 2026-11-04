@@ -89,11 +89,24 @@ export type CountrySnapshot = {
   values: { indicatorCode: string; value: number }[];
 };
 
+export type SavedView = {
+  id: number;
+  name: string;
+  ind: string;
+  yr: number | null;
+  ctry: string;
+  ord: string;
+  rgn: string | null;
+  url: string;
+  createdAt: string;
+};
+
 export type DashboardMeta = {
   dataSummary: { regions: string[] };
   dashboardSummary: DashboardSummary;
   indicators: IndicatorMeta[];
   countries: CountryMeta[];
+  savedViews: SavedView[];
 };
 
 export type DashboardData = {
@@ -160,6 +173,17 @@ const META_QUERY = /* GraphQL */ `
       code
       name
       region
+    }
+    savedViews {
+      id
+      name
+      ind
+      yr
+      ctry
+      ord
+      rgn
+      url
+      createdAt
     }
   }
 `;

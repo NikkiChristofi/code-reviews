@@ -64,3 +64,14 @@ model Observation {
   @@unique([countryCode, indicatorCode, year])
   @@index([indicatorCode, year])
 }
+
+model SavedView {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  ind       String
+  yr        Int?
+  ctry      String
+  ord       String   @default("DESC")
+  rgn       String?
+  createdAt DateTime @default(now())
+}
