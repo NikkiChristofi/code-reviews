@@ -27,20 +27,34 @@ COPY apps/api apps/api
 RUN npm run build -w apps/api
 
 # ---------------------------------------------------------------------------
+# api-deps: production dependencies for the api workspace only
+# ---------------------------------------------------------------------------
+FROM node:${NODE_VERSION} AS api-deps
+WORKDIR /app
+RUN apk add --no-cache libc6-compat openssl
+COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/web/package.json apps/web/package.json
+RUN npm ci --omit=dev --workspace apps/api
+
+# ---------------------------------------------------------------------------
 # api: runtime image (GraphQL API + SQLite file on a volume)
+# Only the api workspace's production dependencies are copied in, plus the
+# generated Prisma client from the build stage. COPY --chown avoids a second
+# full copy of node_modules that a separate 'RUN chown -R' would create.
 # ---------------------------------------------------------------------------
 FROM node:${NODE_VERSION} AS api
 WORKDIR /app
 ENV NODE_ENV=production
-RUN apk add --no-cache openssl
-COPY --from=api-build /app/node_modules ./node_modules
-COPY --from=api-build /app/package.json ./package.json
-COPY --from=api-build /app/apps/api/package.json ./apps/api/package.json
-COPY --from=api-build /app/apps/api/dist ./apps/api/dist
-COPY --from=api-build /app/apps/api/prisma ./apps/api/prisma
-COPY docker/api-entrypoint.sh /usr/local/bin/api-entrypoint.sh
-RUN chmod +x /usr/local/bin/api-entrypoint.sh \
- && mkdir -p /data && chown -R node:node /data /app
+RUN apk add --no-cache openssl \
+ && mkdir -p /data && chown node:node /data /app
+COPY --chown=node:node --from=api-deps /app/node_modules ./node_modules
+COPY --chown=node:node --from=api-build /app/node_modules/.prisma ./node_modules/.prisma
+COPY --chown=node:node --from=api-build /app/package.json ./package.json
+COPY --chown=node:node --from=api-build /app/apps/api/package.json ./apps/api/package.json
+COPY --chown=node:node --from=api-build /app/apps/api/dist ./apps/api/dist
+COPY --chown=node:node --from=api-build /app/apps/api/prisma ./apps/api/prisma
+COPY --chmod=755 docker/api-entrypoint.sh /usr/local/bin/api-entrypoint.sh
 USER node
 WORKDIR /app/apps/api
 ENV PORT=4000
