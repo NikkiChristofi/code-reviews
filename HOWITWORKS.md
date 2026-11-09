@@ -25,7 +25,9 @@ docker compose up --build
 - GraphQL API + GraphiQL playground: http://localhost:4000/graphql
 - API health check: http://localhost:4000/health
 
-The API container runs `prisma migrate deploy`, seeds the database and ingests the World Bank dataset on start-up (the ingest is skipped if data is already present). The SQLite file lives in the `sqlite-data` volume at `/data/app.db`. To wipe it:
+Both containers run in **development mode with hot reload**: `apps/api` and `apps/web` are bind-mounted from your checkout, the API restarts when a file under `apps/api` changes (`tsx watch`), and the web app hot-reloads in the browser (`next dev`). Dependencies live inside the containers, so after changing a `package.json` run `docker compose up --build` again.
+
+On start-up the API container generates the Prisma client, runs `prisma migrate deploy`, seeds the database and ingests the World Bank dataset (the ingest is skipped if data is already present). After editing `schema.prisma`, create the migration locally with `npm run db:migrate` and restart the api container to apply it. The SQLite file lives in the `sqlite-data` volume at `/data/app.db`. To wipe it:
 
 ```bash
 docker compose down -v
