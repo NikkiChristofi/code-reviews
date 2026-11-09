@@ -2,8 +2,13 @@ services:
   api:
     build:
       context: .
-      target: api
+      # Dev mode: use the `deps` stage (all workspace deps installed, no
+      # production build) and run the API under tsx watch against the
+      # bind-mounted source. The `api` stage in the Dockerfile is the
+      # production build if you ever need it.
+      target: deps
     container_name: code-reviews-api
+    command: ["sh", "/app/docker/api-dev-entrypoint.sh"]
     ports:
       - "4000:4000"
     environment:
@@ -11,13 +16,17 @@ services:
       DATABASE_URL: "file:/data/app.db"
       CORS_ORIGIN: "http://localhost:3000"
     volumes:
+      # Live source from the host: edits restart the API automatically.
+      - ./apps/api:/app/apps/api
+      - ./docker:/app/docker:ro
       - sqlite-data:/data
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:4000/health"]
       interval: 10s
       timeout: 3s
-      retries: 5
-      start_period: 10s
+      retries: 10
+      # First start also generates the Prisma client and ingests ~75k rows.
+      start_period: 40s
 
   web:
     build:
