@@ -20,6 +20,7 @@ type Indicator = {
 type HomeData = {
   hello: string;
   greetings: Greeting[];
+  savedViews: { id: number; name: string; indicatorCode: string; year: number; countries: string[] }[];
   dataSummary: {
     countries: number;
     indicators: number;
@@ -34,6 +35,13 @@ type HomeData = {
 const HOME_QUERY = /* GraphQL */ `
   query Home {
     hello
+    savedViews(limit: 5) {
+      id
+      name
+      indicatorCode
+      year
+      countries
+    }
     greetings {
       id
       message
@@ -193,6 +201,33 @@ export default async function Home() {
                   >
                     {new Date(g.createdAt).toLocaleString("en-GB")}
                   </time>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
+      {result.ok && (
+        <section className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="mb-4 flex items-baseline justify-between gap-4">
+            <h2 className="text-lg font-medium">Saved views</h2>
+            <Link href="/dashboard" className="text-xs font-medium underline underline-offset-4">
+              Open the dashboard →
+            </Link>
+          </div>
+          {result.data.savedViews.length === 0 ? (
+            <p className="text-zinc-500">No saved views yet. Save one from the dashboard.</p>
+          ) : (
+            <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+              {result.data.savedViews.map((v) => (
+                <li key={v.id} className="flex items-baseline justify-between gap-4 py-2">
+                  <Link href={`/dashboard?view=${v.id}`} className="font-medium underline underline-offset-4">
+                    {v.name}
+                  </Link>
+                  <span className="shrink-0 font-mono text-xs text-zinc-500">
+                    {v.indicatorCode} · {v.year}
+                  </span>
                 </li>
               ))}
             </ul>

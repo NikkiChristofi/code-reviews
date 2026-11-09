@@ -64,3 +64,27 @@ model Observation {
   @@unique([countryCode, indicatorCode, year])
   @@index([indicatorCode, year])
 }
+
+/// A dashboard configuration saved by a user so it can be reopened later.
+model SavedView {
+  id            Int      @id @default(autoincrement())
+  /// Name as entered (trimmed)
+  name          String
+  /// Lower-cased name, used to enforce uniqueness regardless of case
+  nameKey       String   @unique
+  indicatorCode String
+  year          Int
+  /// Comma-separated ISO3 codes, in the order they were chosen
+  countries     String
+  /// "ASC" or "DESC"
+  order         String
+  /// Region highlighted on the scatter chart, if any
+  region        String?
+  createdAt     DateTime @default(now())
+}
+
+/// Records one-off seed steps so they are not re-applied on every start-up.
+model SeedRun {
+  key       String   @id
+  appliedAt DateTime @default(now())
+}

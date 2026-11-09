@@ -1,11 +1,17 @@
 import { Suspense } from "react";
+import { redirect } from "next/navigation";
 import {
   GDP_PER_CAPITA,
   LIFE_EXPECTANCY,
+  buildDashboardUrl,
+  explainUnavailable,
   fetchDashboardData,
   fetchDashboardMeta,
   parseParams,
+  sameConfig,
   toScatterPoints,
+  viewToConfig,
+  type DashboardConfig,
   type RawSearchParams,
 } from "@/lib/dashboard";
 import { formatCompact, formatIndicatorValue, shortIndicatorName } from "@/lib/format";
@@ -18,6 +24,7 @@ import { RegionBarChart } from "@/components/charts/RegionBarChart";
 import { GdpLifeScatter } from "@/components/charts/GdpLifeScatter";
 import { RankingTable } from "@/components/dashboard/RankingTable";
 import { Controls } from "@/components/dashboard/Controls";
+import { SavedViews } from "@/components/dashboard/SavedViews";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +33,8 @@ export const metadata = { title: "Dashboard · Code Reviews" };
 type PageProps = { searchParams: Promise<RawSearchParams> };
 
 export default async function DashboardPage({ searchParams }: PageProps) {
-  const params = parseParams(await searchParams);
+  const raw = await searchParams;
+  const params = parseParams(raw);
 
   let meta;
   try {
@@ -40,6 +48,21 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         </div>
       </main>
     );
+  }
+
+  // Opening a saved view: redirect to its full configuration URL if it can be shown,
+  // otherwise explain why and show the default dashboard. redirect() must stay outside try.
+  const viewParam = Array.isArray(raw.view) ? raw.view[0] : raw.view;
+  let viewNotice: string | null = null;
+  if (viewParam !== undefined) {
+    const saved = meta.savedViews.find((v) => String(v.id) === viewParam);
+    if (!saved) {
+      viewNotice = "That saved view could not be found. It may have been deleted.";
+    } else {
+      const problem = explainUnavailable(saved, meta);
+      if (problem) viewNotice = `The saved view "${saved.name}" can't be shown because ${problem}.`;
+      else redirect(buildDashboardUrl(viewToConfig(saved)));
+    }
   }
 
   const indicator =
@@ -61,6 +84,15 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     snapshotYear: scatterYear,
   });
 
+  const currentConfig: DashboardConfig = {
+    indicator: indicator.code,
+    year,
+    countries: params.countries,
+    order: params.order,
+    region: params.region,
+  };
+  const activeView = meta.savedViews.find((v) => sameConfig(viewToConfig(v), currentConfig)) ?? null;
+
   const indicatorName = shortIndicatorName(indicator.code, indicator.name);
   const selectedCountries = params.countries.map((code) => ({
     code,
@@ -77,6 +109,19 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
           {summary.countries} countries · data up to {summary.latestYear}
         </p>
+        {viewNotice && (
+          <div
+            role="alert"
+            className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+          >
+            {viewNotice}
+          </div>
+        )}
+        {activeView && (
+          <p className="rounded-lg bg-zinc-100 px-4 py-2 text-sm dark:bg-zinc-800">
+            Viewing saved view: <span className="font-medium">{activeView.name}</span>
+          </p>
+        )}
       </header>
 
       {/* 1. Headline tiles */}
@@ -110,6 +155,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           yearOptions={yearOptions}
         />
       </Suspense>
+
+      <SavedViews views={meta.savedViews} current={currentConfig} activeViewId={activeView?.id ?? null} />
 
       {/* 2. Indicator over time */}
       <ChartCard

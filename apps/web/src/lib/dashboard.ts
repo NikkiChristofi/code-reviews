@@ -94,6 +94,7 @@ export type DashboardMeta = {
   dashboardSummary: DashboardSummary;
   indicators: IndicatorMeta[];
   countries: CountryMeta[];
+  savedViews: SavedView[];
 };
 
 export type DashboardData = {
@@ -132,6 +133,77 @@ export function toScatterPoints(snapshot: CountrySnapshot[]): ScatterPoint[] {
   return points;
 }
 
+// ---------------------------------------------------------------- saved views
+
+export type SavedView = {
+  id: number;
+  name: string;
+  indicatorCode: string;
+  year: number;
+  countries: string[];
+  order: SortOrder;
+  region: string | null;
+  createdAt: string;
+};
+
+/** The configuration a saved view restores. Mirrors the dashboard URL parameters. */
+export type DashboardConfig = {
+  indicator: string;
+  year: number;
+  countries: string[];
+  order: SortOrder;
+  region: string | null;
+};
+
+/** Dashboard URL for a configuration. URLSearchParams encodes names such as "Europe & Central Asia". */
+export function buildDashboardUrl(config: DashboardConfig): string {
+  const sp = new URLSearchParams({
+    indicator: config.indicator,
+    year: String(config.year),
+    countries: config.countries.join(","),
+    order: config.order,
+  });
+  if (config.region) sp.set("region", config.region);
+  return `/dashboard?${sp.toString()}`;
+}
+
+export function viewToConfig(view: SavedView): DashboardConfig {
+  return {
+    indicator: view.indicatorCode,
+    year: view.year,
+    countries: view.countries,
+    order: view.order,
+    region: view.region,
+  };
+}
+
+export function sameConfig(a: DashboardConfig, b: DashboardConfig): boolean {
+  return (
+    a.indicator === b.indicator &&
+    a.year === b.year &&
+    a.order === b.order &&
+    (a.region ?? null) === (b.region ?? null) &&
+    a.countries.join(",") === b.countries.join(",")
+  );
+}
+
+/** Why a saved view cannot be shown with the current data, or null if it can. */
+export function explainUnavailable(view: SavedView, meta: DashboardMeta): string | null {
+  const indicator = meta.indicators.find((i) => i.code === view.indicatorCode);
+  if (!indicator) return `its indicator (${view.indicatorCode}) is no longer in the database`;
+  if (indicator.yearRange && (view.year < indicator.yearRange.min || view.year > indicator.yearRange.max)) {
+    return `${view.year} is outside the data for this indicator (${indicator.yearRange.min}–${indicator.yearRange.max})`;
+  }
+  const missingCountries = view.countries.filter((code) => !meta.countries.some((c) => c.code === code));
+  if (missingCountries.length) {
+    return `some countries are no longer in the database (${missingCountries.join(", ")})`;
+  }
+  if (view.region && !meta.dataSummary.regions.includes(view.region)) {
+    return `the region "${view.region}" is no longer in the database`;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------- queries
 
 const META_QUERY = /* GraphQL */ `
@@ -160,6 +232,16 @@ const META_QUERY = /* GraphQL */ `
       code
       name
       region
+    }
+    savedViews(limit: 200) {
+      id
+      name
+      indicatorCode
+      year
+      countries
+      order
+      region
+      createdAt
     }
   }
 `;

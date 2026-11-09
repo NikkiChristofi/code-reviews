@@ -1,4 +1,5 @@
 import { createSchema } from "graphql-yoga";
+import { GraphQLError } from "graphql";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./db.js";
 
@@ -102,6 +103,31 @@ export const typeDefs = /* GraphQL */ `
     values: [SnapshotValue!]!
   }
 
+  "A dashboard configuration saved so it can be reopened later."
+  type SavedView {
+    id: Int!
+    "Name as entered, trimmed. Unique regardless of case."
+    name: String!
+    indicatorCode: String!
+    year: Int!
+    "Countries in the order they were chosen (this sets the chart colours)."
+    countries: [String!]!
+    order: SortOrder!
+    "Region highlighted on the scatter chart, if any."
+    region: String
+    createdAt: String!
+  }
+
+  "Values needed to save a dashboard configuration."
+  input SavedViewInput {
+    name: String!
+    indicatorCode: String!
+    year: Int!
+    countries: [String!]!
+    order: SortOrder = DESC
+    region: String
+  }
+
   enum SortOrder {
     ASC
     DESC
@@ -156,11 +182,20 @@ export const typeDefs = /* GraphQL */ `
     Countries with no value for any of the indicators are omitted.
     """
     countrySnapshot(indicatorCodes: [String!]!, year: Int!): [CountrySnapshot!]!
+
+    "Saved dashboard views, newest first."
+    savedViews(limit: Int = 50): [SavedView!]!
   }
 
   type Mutation {
     "Store a new greeting in the database and return it."
     addGreeting(message: String!): Greeting!
+
+    "Save a dashboard configuration under a name that is unique regardless of case."
+    createSavedView(input: SavedViewInput!): SavedView!
+
+    "Delete a saved dashboard view by id."
+    deleteSavedView(id: Int!): Boolean!
   }
 `;
 
@@ -188,9 +223,104 @@ async function latestYearWithCoverage(indicatorCode: string, minCountries = 100)
 const POPULATION = "SP.POP.TOTL";
 const LIFE_EXPECTANCY = "SP.DYN.LE00.IN";
 
+const MAX_SAVED_VIEW_NAME = 60;
+const MAX_COUNTRIES = 8;
+const ISO3 = /^[A-Z]{3}$/;
+
+type SavedViewRow = {
+  id: number;
+  name: string;
+  indicatorCode: string;
+  year: number;
+  countries: string;
+  order: string;
+  region: string | null;
+  createdAt: Date;
+};
+
+type SavedViewArgs = {
+  name: string;
+  indicatorCode: string;
+  year: number;
+  countries: string[];
+  order?: "ASC" | "DESC" | null;
+  region?: string | null;
+};
+
+function toSavedView(row: SavedViewRow) {
+  return {
+    id: row.id,
+    name: row.name,
+    indicatorCode: row.indicatorCode,
+    year: row.year,
+    countries: row.countries.split(","),
+    order: row.order,
+    region: row.region,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+function prismaErrorCode(err: unknown): string | undefined {
+  return typeof err === "object" && err !== null && "code" in err ? String(err.code) : undefined;
+}
+
+/** Checks a saved view before it is stored. Errors are GraphQLErrors so the user sees the message. */
+async function validateSavedView(args: SavedViewArgs) {
+  const name = args.name.trim();
+  if (!name) throw new GraphQLError("Give the view a name.");
+  if (name.length > MAX_SAVED_VIEW_NAME) {
+    throw new GraphQLError(`The name must be ${MAX_SAVED_VIEW_NAME} characters or fewer.`);
+  }
+
+  const indicatorCode = args.indicatorCode.trim();
+  if (!indicatorCode) throw new GraphQLError("Choose an indicator.");
+  if (!Number.isInteger(args.year) || args.year < 1) {
+    throw new GraphQLError("The year must be a positive whole number.");
+  }
+
+  const countries = args.countries.map((c) => c.trim().toUpperCase());
+  if (countries.length === 0 || countries.length > MAX_COUNTRIES) {
+    throw new GraphQLError(`Choose between 1 and ${MAX_COUNTRIES} countries.`);
+  }
+  if (countries.some((c) => !ISO3.test(c))) {
+    throw new GraphQLError("Country codes must be three letters, e.g. GBR.");
+  }
+  if (new Set(countries).size !== countries.length) {
+    throw new GraphQLError("Each country can only be included once.");
+  }
+
+  const [indicator, matchedCountries] = await Promise.all([
+    prisma.indicator.findUnique({ where: { code: indicatorCode }, select: { code: true } }),
+    prisma.country.count({ where: { code: { in: countries } } }),
+  ]);
+  if (!indicator) throw new GraphQLError(`Unknown indicator: ${indicatorCode}.`);
+  if (matchedCountries !== countries.length) {
+    throw new GraphQLError("One or more countries are not in the database.");
+  }
+
+  return {
+    name,
+    nameKey: name.toLowerCase(),
+    indicatorCode,
+    year: args.year,
+    countries: countries.join(","),
+    order: args.order === "ASC" ? "ASC" : "DESC",
+    region: args.region?.trim() || null,
+  };
+}
+
 export const resolvers = {
   Query: {
     hello: () => "Hello, World!",
+
+    savedViews: async (_p: unknown, args: { limit?: number | null }) => {
+      const limit = Math.min(Math.max(args.limit ?? 50, 1), 200);
+      const rows = await prisma.savedView.findMany({
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: limit,
+      });
+      return rows.map(toSavedView);
+    },
 
     greetings: async () => prisma.greeting.findMany({ orderBy: { createdAt: "desc" } }),
 
@@ -327,6 +457,31 @@ export const resolvers = {
   },
 
   Mutation: {
+    createSavedView: async (_p: unknown, args: { input: SavedViewArgs }) => {
+      const data = await validateSavedView(args.input);
+      try {
+        const row = await prisma.savedView.create({ data });
+        return toSavedView(row);
+      } catch (err) {
+        if (prismaErrorCode(err) === "P2002") {
+          throw new GraphQLError(`A saved view called "${data.name}" already exists. Choose another name.`);
+        }
+        throw err;
+      }
+    },
+
+    deleteSavedView: async (_p: unknown, args: { id: number }) => {
+      try {
+        await prisma.savedView.delete({ where: { id: args.id } });
+        return true;
+      } catch (err) {
+        if (prismaErrorCode(err) === "P2025") {
+          throw new GraphQLError("That saved view no longer exists. Refresh the page to see the current list.");
+        }
+        throw err;
+      }
+    },
+
     addGreeting: async (_parent: unknown, args: { message: string }) => {
       const message = args.message.trim();
       if (!message) {

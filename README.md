@@ -147,6 +147,14 @@ Every chart has a "View as table" fallback. The **year** selector defaults to th
 `latestYear` (most recent year with at least 100 countries reporting). The scatter uses the latest
 year where *both* of its indicators are available, which may be earlier than the selected year.
 
+## Saved views
+
+Save the dashboard as it is on screen (indicator, year, countries, ranking order and highlighted region) under a name, then reopen it from the dashboard or the home page. Names are required, trimmed, at most 60 characters and unique regardless of case. Deleting a view asks for confirmation.
+
+A view stores its exact year, so it does not change when the data is re-ingested. Views live in the `SavedView` table. Three examples are seeded on the first start-up. If you delete them they stay deleted, because the seed runs only once (tracked in `SeedRun`).
+
+If a view refers to data that no longer exists (for example an indicator or country), the dashboard explains why instead of showing an error page.
+
 ## GraphQL API
 
 Explore interactively in GraphiQL at http://localhost:4000/graphql. The main queries:
@@ -165,6 +173,13 @@ type Query {
   countrySnapshot(indicatorCodes: [String!]!, year: Int!): [CountrySnapshot!]!
   hello: String!
   greetings: [Greeting!]!
+  savedViews(limit: Int = 50): [SavedView!]!   # saved dashboard views, newest first
+}
+
+type Mutation {
+  createSavedView(input: SavedViewInput!): SavedView!
+  deleteSavedView(id: Int!): Boolean!
+  addGreeting(message: String!): Greeting!
 }
 ```
 
