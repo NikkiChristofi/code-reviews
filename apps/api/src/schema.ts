@@ -1,3 +1,4 @@
+import { GraphQLError } from "graphql";
 import { createSchema } from "graphql-yoga";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "./db.js";
@@ -107,6 +108,34 @@ export const typeDefs = /* GraphQL */ `
     DESC
   }
 
+  "A saved snapshot of the dashboard controls."
+  type DashboardView {
+    id: Int!
+    name: String!
+    indicatorCode: String!
+    indicator: Indicator!
+    year: Int!
+    order: SortOrder!
+    "Highlighted region, or null for all regions."
+    region: String
+    "ISO3 codes of the countries shown in the time-series chart."
+    countryCodes: [String!]!
+    createdAt: String!
+  }
+
+  "The dashboard selections to save."
+  input SaveDashboardViewInput {
+    "Label shown in the saved views list (1–80 characters)."
+    name: String!
+    indicatorCode: String!
+    year: Int!
+    order: SortOrder!
+    "Highlighted region; omit or null for all regions."
+    region: String
+    "ISO3 country codes, e.g. GBR. Between 1 and 8 countries."
+    countryCodes: [String!]!
+  }
+
   type Query {
     "Simple health-check style query that does not touch the database."
     hello: String!
@@ -156,11 +185,17 @@ export const typeDefs = /* GraphQL */ `
     Countries with no value for any of the indicators are omitted.
     """
     countrySnapshot(indicatorCodes: [String!]!, year: Int!): [CountrySnapshot!]!
+
+    "Saved dashboard views, newest first."
+    dashboardViews: [DashboardView!]!
   }
 
   type Mutation {
     "Store a new greeting in the database and return it."
     addGreeting(message: String!): Greeting!
+
+    "Save the current dashboard selections and return the stored view."
+    saveDashboardView(input: SaveDashboardViewInput!): DashboardView!
   }
 `;
 
@@ -186,6 +221,31 @@ async function latestYearWithCoverage(indicatorCode: string, minCountries = 100)
 }
 
 const POPULATION = "SP.POP.TOTL";
+const MAX_VIEW_COUNTRIES = 8;
+const MAX_VIEW_NAME_LENGTH = 80;
+
+/** A validation error whose message is shown to the client (plain Errors are masked by Yoga). */
+const badInput = (message: string) => new GraphQLError(message, { extensions: { code: "BAD_USER_INPUT" } });
+
+type SaveDashboardViewInput = {
+  name: string;
+  indicatorCode: string;
+  year: number;
+  order: "ASC" | "DESC";
+  region?: string | null;
+  countryCodes: string[];
+};
+
+type DashboardViewRow = {
+  id: number;
+  name: string;
+  indicatorCode: string;
+  year: number;
+  sortOrder: string;
+  region: string | null;
+  countryCodes: string;
+  createdAt: Date;
+};
 const LIFE_EXPECTANCY = "SP.DYN.LE00.IN";
 
 export const resolvers = {
@@ -324,6 +384,9 @@ export const resolvers = {
       }
       return [...byCountry.values()];
     },
+
+    dashboardViews: async () =>
+      prisma.dashboardView.findMany({ orderBy: [{ createdAt: "desc" }, { id: "desc" }] }),
   },
 
   Mutation: {
@@ -334,6 +397,46 @@ export const resolvers = {
       }
       return prisma.greeting.create({ data: { message } });
     },
+
+    saveDashboardView: async (_parent: unknown, { input }: { input: SaveDashboardViewInput }) => {
+      const name = input.name.trim();
+      if (!name || name.length > MAX_VIEW_NAME_LENGTH) {
+        throw badInput(`View name must be between 1 and ${MAX_VIEW_NAME_LENGTH} characters.`);
+      }
+      const countryCodes = [...new Set(input.countryCodes.map((c) => c.trim().toUpperCase()))];
+      if (countryCodes.length === 0 || countryCodes.length > MAX_VIEW_COUNTRIES) {
+        throw badInput(`A view must include between 1 and ${MAX_VIEW_COUNTRIES} countries.`);
+      }
+      const region = input.region?.trim() || null;
+
+      const [indicator, knownCountries, regionMatch] = await Promise.all([
+        prisma.indicator.findUnique({ where: { code: input.indicatorCode }, select: { code: true } }),
+        prisma.country.count({ where: { code: { in: countryCodes } } }),
+        region ? prisma.country.findFirst({ where: { region }, select: { code: true } }) : null,
+      ]);
+      if (!indicator) throw badInput(`Unknown indicator "${input.indicatorCode}".`);
+      if (knownCountries !== countryCodes.length) throw badInput("One or more country codes are unknown.");
+      if (region && !regionMatch) throw badInput(`Unknown region "${region}".`);
+
+      return prisma.dashboardView.create({
+        data: {
+          name,
+          indicatorCode: indicator.code,
+          year: input.year,
+          sortOrder: input.order,
+          region,
+          countryCodes: countryCodes.join(","),
+        },
+      });
+    },
+  },
+
+  DashboardView: {
+    order: (parent: DashboardViewRow) => parent.sortOrder,
+    countryCodes: (parent: DashboardViewRow) => parent.countryCodes.split(",").filter(Boolean),
+    createdAt: (parent: DashboardViewRow) => parent.createdAt.toISOString(),
+    indicator: (parent: DashboardViewRow) =>
+      prisma.indicator.findUniqueOrThrow({ where: { code: parent.indicatorCode } }),
   },
 
   Greeting: {

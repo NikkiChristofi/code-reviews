@@ -18,6 +18,8 @@ import { RegionBarChart } from "@/components/charts/RegionBarChart";
 import { GdpLifeScatter } from "@/components/charts/GdpLifeScatter";
 import { RankingTable } from "@/components/dashboard/RankingTable";
 import { Controls } from "@/components/dashboard/Controls";
+import { SaveViewButton } from "@/components/dashboard/SaveViewButton";
+import { SavedViewsSelect } from "@/components/dashboard/SavedViewsSelect";
 
 export const dynamic = "force-dynamic";
 
@@ -68,15 +70,32 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   }));
   const scatterPoints = toScatterPoints(data.countrySnapshot);
   const { dashboardSummary: summary } = meta;
+  const selection = {
+    indicatorCode: indicator.code,
+    year,
+    order: params.order,
+    region: params.region,
+    countryCodes: params.countries,
+  };
 
   return (
     <main className="mx-auto flex w-full min-w-0 max-w-6xl flex-1 flex-col gap-6 px-6 py-10">
-      <header className="flex flex-col gap-1">
-        <p className="text-sm font-medium uppercase tracking-wide text-zinc-500">Code Reviews</p>
-        <h1 className="text-3xl font-semibold tracking-tight">World Bank dashboard</h1>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          {summary.countries} countries · data up to {summary.latestYear}
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <p className="text-sm font-medium uppercase tracking-wide text-zinc-500">Code Reviews</p>
+          <h1 className="text-3xl font-semibold tracking-tight">World Bank dashboard</h1>
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            {summary.countries} countries · data up to {summary.latestYear}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-start gap-2">
+          <SavedViewsSelect views={meta.dashboardViews} current={selection} />
+          <SaveViewButton
+            // Keyed on the selections so the "Saved" message resets when they change.
+            key={`${indicator.code}|${year}|${params.order}|${params.region ?? ""}|${params.countries.join(",")}`}
+            selection={selection}
+          />
+        </div>
       </header>
 
       {/* 1. Headline tiles */}

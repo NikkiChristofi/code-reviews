@@ -48,6 +48,7 @@ model Indicator {
   lastFetchedAt      DateTime?
 
   observations Observation[]
+  savedViews   DashboardView[]
 }
 
 /// One value of one indicator for one country in one year.
@@ -63,4 +64,22 @@ model Observation {
 
   @@unique([countryCode, indicatorCode, year])
   @@index([indicatorCode, year])
+}
+
+/// A saved dashboard configuration (the controls' selections at the time of saving).
+model DashboardView {
+  id            Int      @id @default(autoincrement())
+  /// User-supplied label shown in the saved views dropdown
+  name          String
+  indicatorCode String
+  year          Int
+  /// Ranking order: "ASC" or "DESC" (mirrors the GraphQL SortOrder enum)
+  sortOrder     String
+  /// Highlighted World Bank region, or null for all regions
+  region        String?
+  /// Comma-separated ISO3 codes, e.g. "GBR,USA,FRA"
+  countryCodes  String
+  createdAt     DateTime @default(now())
+
+  indicator Indicator @relation(fields: [indicatorCode], references: [code], onDelete: Cascade)
 }

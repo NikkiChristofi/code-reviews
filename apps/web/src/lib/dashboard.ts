@@ -89,11 +89,23 @@ export type CountrySnapshot = {
   values: { indicatorCode: string; value: number }[];
 };
 
+/** The dashboard selections that make up a saved view. */
+export type DashboardSelection = {
+  indicatorCode: string;
+  year: number;
+  order: SortOrder;
+  region: string | null;
+  countryCodes: string[];
+};
+
+export type SavedView = DashboardSelection & { id: number; name: string };
+
 export type DashboardMeta = {
   dataSummary: { regions: string[] };
   dashboardSummary: DashboardSummary;
   indicators: IndicatorMeta[];
   countries: CountryMeta[];
+  dashboardViews: SavedView[];
 };
 
 export type DashboardData = {
@@ -161,6 +173,15 @@ const META_QUERY = /* GraphQL */ `
       name
       region
     }
+    dashboardViews {
+      id
+      name
+      indicatorCode
+      year
+      order
+      region
+      countryCodes
+    }
   }
 `;
 
@@ -222,4 +243,44 @@ export async function fetchDashboardData(params: {
     ...params,
     snapshotIndicators: [GDP_PER_CAPITA, LIFE_EXPECTANCY, POPULATION],
   });
+}
+
+// ---------------------------------------------------------------- mutations
+
+export type SaveDashboardViewInput = DashboardSelection & { name: string };
+
+const SAVE_VIEW_MUTATION = /* GraphQL */ `
+  mutation SaveDashboardView($input: SaveDashboardViewInput!) {
+    saveDashboardView(input: $input) {
+      id
+    }
+  }
+`;
+
+/** Persist the current dashboard selections. Returns the new view's id. */
+export async function saveDashboardView(input: SaveDashboardViewInput): Promise<number> {
+  const data = await gqlFetch<{ saveDashboardView: { id: number } }>(SAVE_VIEW_MUTATION, { input });
+  return data.saveDashboardView.id;
+}
+
+/** Dashboard query string for a selection (the inverse of `parseParams`). */
+export function selectionToSearchParams(selection: DashboardSelection): URLSearchParams {
+  const sp = new URLSearchParams({
+    indicator: selection.indicatorCode,
+    year: String(selection.year),
+    order: selection.order,
+    countries: selection.countryCodes.join(","),
+  });
+  if (selection.region) sp.set("region", selection.region);
+  return sp;
+}
+
+export function isSameSelection(a: DashboardSelection, b: DashboardSelection): boolean {
+  return (
+    a.indicatorCode === b.indicatorCode &&
+    a.year === b.year &&
+    a.order === b.order &&
+    (a.region ?? null) === (b.region ?? null) &&
+    a.countryCodes.join(",") === b.countryCodes.join(",")
+  );
 }
