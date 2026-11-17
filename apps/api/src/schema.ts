@@ -1,5 +1,6 @@
 import { createSchema } from "graphql-yoga";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import { GraphQLError } from "graphql";
 import { prisma } from "./db.js";
 
 export const typeDefs = /* GraphQL */ `
@@ -107,7 +108,45 @@ export const typeDefs = /* GraphQL */ `
     DESC
   }
 
+  "A named, persistent snapshot of the dashboard configuration."
+  type SavedView {
+    "Unique identifier for this view."
+    id: Int!
+    "Unique, trimmed name of up to 60 characters."
+    name: String!
+    "World Bank indicator code."
+    indicator: String!
+    "Explicit year displayed when this view was saved."
+    year: Int!
+    "Ordered ISO3 country codes for the line chart."
+    countries: [String!]!
+    "Direction of the country ranking."
+    order: SortOrder!
+    "Highlighted region, or null for all regions."
+    region: String
+    "Creation time in ISO 8601 format."
+    createdAt: String!
+  }
+
+  "Name and all five settings needed to recreate a dashboard configuration."
+  input CreateSavedViewInput {
+    "Required unique name; surrounding whitespace is removed. Maximum 60 characters."
+    name: String!
+    "World Bank indicator code."
+    indicator: String!
+    "Explicit year to restore."
+    year: Int!
+    "One to eight distinct ISO3 country codes, in chart order."
+    countries: [String!]!
+    "Direction of the country ranking."
+    order: SortOrder!
+    "Highlighted region; omit or use null for all regions."
+    region: String
+  }
+
   type Query {
+    "All saved dashboard views, newest first."
+    savedViews: [SavedView!]!
     "Simple health-check style query that does not touch the database."
     hello: String!
 
@@ -159,12 +198,30 @@ export const typeDefs = /* GraphQL */ `
   }
 
   type Mutation {
+    "Save a dashboard configuration under a unique name."
+    createSavedView(input: CreateSavedViewInput!): SavedView!
+
+    "Delete a saved view. Returns false if it was already removed."
+    deleteSavedView(id: Int!): Boolean!
     "Store a new greeting in the database and return it."
     addGreeting(message: String!): Greeting!
   }
 `;
 
 type YearArgs = { fromYear?: number | null; toYear?: number | null };
+
+type CreateSavedViewInput = {
+  name: string;
+  indicator: string;
+  year: number;
+  countries: string[];
+  order: "ASC" | "DESC";
+  region?: string | null;
+};
+
+function invalidView(message: string): never {
+  throw new GraphQLError(message, { extensions: { code: "BAD_USER_INPUT" } });
+}
 
 function yearFilter({ fromYear, toYear }: YearArgs): Prisma.IntFilter | undefined {
   if (fromYear == null && toYear == null) return undefined;
@@ -190,6 +247,7 @@ const LIFE_EXPECTANCY = "SP.DYN.LE00.IN";
 
 export const resolvers = {
   Query: {
+    savedViews: () => prisma.savedView.findMany({ orderBy: [{ createdAt: "desc" }, { id: "desc" }] }),
     hello: () => "Hello, World!",
 
     greetings: async () => prisma.greeting.findMany({ orderBy: { createdAt: "desc" } }),
@@ -327,6 +385,42 @@ export const resolvers = {
   },
 
   Mutation: {
+    createSavedView: async (_parent: unknown, { input }: { input: CreateSavedViewInput }) => {
+      const name = input.name.trim();
+      if (!name) invalidView("Enter a name for this view.");
+      if (name.length > 60) invalidView("View names must be 60 characters or fewer.");
+      if (input.year < 1) invalidView("Choose a valid year.");
+      if (
+        input.countries.length < 1 || input.countries.length > 8 ||
+        input.countries.some((code) => !/^[A-Z]{3}$/.test(code)) ||
+        new Set(input.countries).size !== input.countries.length
+      ) invalidView("Choose between one and eight distinct countries using ISO3 codes.");
+
+      const [indicator, countries, region] = await Promise.all([
+        prisma.indicator.findUnique({ where: { code: input.indicator } }),
+        prisma.country.count({ where: { code: { in: input.countries } } }),
+        input.region ? prisma.country.findFirst({ where: { region: input.region } }) : null,
+      ]);
+      if (!indicator) invalidView("The selected indicator is no longer available.");
+      if (countries !== input.countries.length) invalidView("One or more selected countries are no longer available.");
+      if (input.region && !region) invalidView("The selected region is no longer available.");
+
+      try {
+        return await prisma.savedView.create({
+          data: { ...input, name, region: input.region || null },
+        });
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+          invalidView("A view with this name already exists. Choose another name.");
+        }
+        throw error;
+      }
+    },
+
+    deleteSavedView: async (_parent: unknown, { id }: { id: number }) => {
+      const result = await prisma.savedView.deleteMany({ where: { id } });
+      return result.count > 0;
+    },
     addGreeting: async (_parent: unknown, args: { message: string }) => {
       const message = args.message.trim();
       if (!message) {
@@ -337,6 +431,10 @@ export const resolvers = {
   },
 
   Greeting: {
+    createdAt: (parent: { createdAt: Date }) => parent.createdAt.toISOString(),
+  },
+
+  SavedView: {
     createdAt: (parent: { createdAt: Date }) => parent.createdAt.toISOString(),
   },
 

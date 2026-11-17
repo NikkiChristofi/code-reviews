@@ -18,6 +18,8 @@ import { RegionBarChart } from "@/components/charts/RegionBarChart";
 import { GdpLifeScatter } from "@/components/charts/GdpLifeScatter";
 import { RankingTable } from "@/components/dashboard/RankingTable";
 import { Controls } from "@/components/dashboard/Controls";
+import { SavedViews } from "@/components/dashboard/SavedViews";
+import { configurationQuery, fetchSavedViews, type SavedView } from "@/lib/saved-views";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +28,8 @@ export const metadata = { title: "Dashboard · Code Reviews" };
 type PageProps = { searchParams: Promise<RawSearchParams> };
 
 export default async function DashboardPage({ searchParams }: PageProps) {
-  const params = parseParams(await searchParams);
+  const rawParams = await searchParams;
+  const params = parseParams(rawParams);
 
   let meta;
   try {
@@ -68,12 +71,32 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   }));
   const scatterPoints = toScatterPoints(data.countrySnapshot);
   const { dashboardSummary: summary } = meta;
+  let savedViews: SavedView[] = [];
+  let savedViewsError: string | null = null;
+  try {
+    savedViews = await fetchSavedViews();
+  } catch {
+    savedViewsError = "Could not load saved views. Please try again.";
+  }
+  const selected = {
+    indicator: indicator.code,
+    year,
+    countries: params.countries,
+    order: params.order,
+    region: params.region,
+  };
+  const viewId = Array.isArray(rawParams.view) ? rawParams.view[0] : rawParams.view;
+  const activeView = savedViews.find(
+    (view) => String(view.id) === viewId && configurationQuery(view) === configurationQuery(selected),
+  ) ?? null;
 
   return (
     <main className="mx-auto flex w-full min-w-0 max-w-6xl flex-1 flex-col gap-6 px-6 py-10">
       <header className="flex flex-col gap-1">
         <p className="text-sm font-medium uppercase tracking-wide text-zinc-500">Code Reviews</p>
-        <h1 className="text-3xl font-semibold tracking-tight">World Bank dashboard</h1>
+        <h1 className="break-words text-3xl font-semibold tracking-tight">
+          World Bank dashboard{activeView ? ` · ${activeView.name}` : ""}
+        </h1>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
           {summary.countries} countries · data up to {summary.latestYear}
         </p>
@@ -96,17 +119,12 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       </div>
 
       <Suspense>
+        <SavedViews selected={selected} views={savedViews} loadError={savedViewsError} activeView={activeView} />
         <Controls
           indicators={meta.indicators}
           countries={meta.countries}
           regions={meta.dataSummary.regions}
-          selected={{
-            indicator: indicator.code,
-            year,
-            countries: params.countries,
-            order: params.order,
-            region: params.region,
-          }}
+          selected={selected}
           yearOptions={yearOptions}
         />
       </Suspense>

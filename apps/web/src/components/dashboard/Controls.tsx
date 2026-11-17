@@ -34,6 +34,7 @@ export function Controls({ indicators, countries, regions, selected, yearOptions
   const update = useCallback(
     (changes: Record<string, string | null>) => {
       const next = new URLSearchParams(searchParams.toString());
+      next.delete("view");
       for (const [k, v] of Object.entries(changes)) {
         if (v === null || v === "") next.delete(k);
         else next.set(k, v);

@@ -17,6 +17,19 @@ model Greeting {
   createdAt DateTime @default(now())
 }
 
+/// A named snapshot of all five dashboard URL settings.
+model SavedView {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  indicator String
+  year      Int
+  /// Ordered array of ISO3 country codes.
+  countries Json
+  order     String
+  region    String?
+  createdAt DateTime @default(now())
+}
+
 /// A country as described by the World Bank API (aggregates such as "World" are excluded).
 model Country {
   /// ISO 3166-1 alpha-3 code, e.g. "GBR"
